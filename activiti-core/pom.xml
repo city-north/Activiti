@@ -50,11 +50,6 @@
         <version>${jakarta-enterprise-concurrent.version}</version>
       </dependency>
       <dependency>
-        <groupId>org.apache.commons</groupId>
-        <artifactId>commons-email</artifactId>
-        <version>${commons-email.version}</version>
-      </dependency>
-      <dependency>
         <groupId>commons-io</groupId>
         <artifactId>commons-io</artifactId>
         <version>${commons-io.version}</version>

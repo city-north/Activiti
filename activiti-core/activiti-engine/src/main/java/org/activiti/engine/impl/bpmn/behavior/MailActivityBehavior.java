@@ -23,10 +23,13 @@ import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Properties
 
-import javax.activation.DataSource;
 import javax.naming.NamingException;
 
+import jakarta.activation.DataSource;
+import jakarta.mail.MessagingException;
+import jakarta.mail.internet.MimeMessage;
 import org.activiti.engine.ActivitiException;
 import org.activiti.engine.ActivitiIllegalArgumentException;
 import org.activiti.engine.cfg.MailServerInfo;
@@ -34,13 +37,11 @@ import org.activiti.engine.delegate.DelegateExecution;
 import org.activiti.engine.delegate.Expression;
 import org.activiti.engine.impl.cfg.ProcessEngineConfigurationImpl;
 import org.activiti.engine.impl.context.Context;
-import org.apache.commons.mail.Email;
-import org.apache.commons.mail.EmailException;
-import org.apache.commons.mail.HtmlEmail;
-import org.apache.commons.mail.MultiPartEmail;
-import org.apache.commons.mail.SimpleEmail;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.mail.javamail.JavaMailSenderImpl;
+import org.springframework.mail.javamail.MimeMessageHelper;
+
 
 /**
 
@@ -74,7 +75,6 @@ public class MailActivityBehavior extends AbstractBpmnActivityBehavior {
 
     boolean doIgnoreException = Boolean.parseBoolean(getStringFromField(ignoreException, execution));
     String exceptionVariable = getStringFromField(exceptionVariableName, execution);
-    Email email = null;
     try {
       String toStr = getStringFromField(to, execution);
       String fromStr = getStringFromField(from, execution);
@@ -88,21 +88,27 @@ public class MailActivityBehavior extends AbstractBpmnActivityBehavior {
       List<DataSource> dataSources = new LinkedList<DataSource>();
       getFilesFromFields(attachments, execution, files, dataSources);
 
-      email = createEmail(textStr, htmlStr, attachmentsExist(files, dataSources));
-      addTo(email, toStr);
-      setFrom(email, fromStr, execution.getTenantId());
-      addCc(email, ccStr);
-      addBcc(email, bccStr);
-      setSubject(email, subjectStr);
-      setMailServerProperties(email, execution.getTenantId());
-      setCharset(email, charSetStr);
-      attach(email, files, dataSources);
+      JavaMailSenderImpl mailSender = new JavaMailSenderImpl();
+      MimeMessage mimeMessage = mailSender.createMimeMessage();
+      MimeMessageHelper msgHelper = new MimeMessageHelper(mimeMessage, "UTF-8");
 
-      email.send();
+
+      setCharset(mailSender, charSetStr);
+      addTo(msgHelper, toStr);
+      setFrom(msgHelper, fromStr, execution.getTenantId());
+      addCc(msgHelper, ccStr);
+      addBcc(msgHelper, bccStr);
+      setSubject(msgHelper, subjectStr);
+      addMailContent(msgHelper, textStr, htmlStr);
+      attach(msgHelper, files, dataSources);
+
+      setMailServerProperties(mailSender, execution.getTenantId());
+
+      mailSender.send(mimeMessage);
 
     } catch (ActivitiException e) {
       handleException(execution, e.getMessage(), e, doIgnoreException, exceptionVariable);
-    } catch (EmailException e) {
+    } catch (MessagingException e) {
       handleException(execution, "Could not send e-mail in execution " + execution.getId(), e, doIgnoreException, exceptionVariable);
     }
 
@@ -113,60 +119,26 @@ public class MailActivityBehavior extends AbstractBpmnActivityBehavior {
     return !((files == null || files.isEmpty()) && (dataSources == null || dataSources.isEmpty()));
   }
 
-  protected Email createEmail(String text, String html, boolean attachmentsExist) {
-    if (html != null) {
-      return createHtmlEmail(text, html);
-    } else if (text != null) {
-      if (!attachmentsExist) {
-        return createTextOnlyEmail(text);
-      } else {
-        return createMultiPartEmail(text);
+  protected void addMailContent(MimeMessageHelper msgHelper, String text, String html) {
+      try {
+        if (html != null) {
+            msgHelper.setText(text, html);
+        } else if (text != null) {
+            msgHelper.setText(text);
+        } else {
+          throw new ActivitiIllegalArgumentException("'html' or 'text' is required to be defined when using the mail activity");
+        }
+      } catch (MessagingException e) {
+          throw new RuntimeException(e);
       }
-    } else {
-      throw new ActivitiIllegalArgumentException("'html' or 'text' is required to be defined when using the mail activity");
-    }
   }
-
-  protected HtmlEmail createHtmlEmail(String text, String html) {
-    HtmlEmail email = new HtmlEmail();
-    try {
-      email.setHtmlMsg(html);
-      if (text != null) { // for email clients that don't support html
-        email.setTextMsg(text);
-      }
-      return email;
-    } catch (EmailException e) {
-      throw new ActivitiException("Could not create HTML email", e);
-    }
-  }
-
-  protected SimpleEmail createTextOnlyEmail(String text) {
-    SimpleEmail email = new SimpleEmail();
-    try {
-      email.setMsg(text);
-      return email;
-    } catch (EmailException e) {
-      throw new ActivitiException("Could not create text-only email", e);
-    }
-  }
-
-  protected MultiPartEmail createMultiPartEmail(String text) {
-    MultiPartEmail email = new MultiPartEmail();
-    try {
-      email.setMsg(text);
-      return email;
-    } catch (EmailException e) {
-      throw new ActivitiException("Could not create text-only email", e);
-    }
-  }
-
-  protected void addTo(Email email, String to) {
+  protected void addTo(MimeMessageHelper msgHelper, String to) {
     String[] tos = splitAndTrim(to);
     if (tos != null) {
       for (String t : tos) {
         try {
-          email.addTo(t);
-        } catch (EmailException e) {
+            msgHelper.setTo(t);
+        } catch (MessagingException e) {
           throw new ActivitiException("Could not add " + t + " as recipient", e);
         }
       }
@@ -175,7 +147,7 @@ public class MailActivityBehavior extends AbstractBpmnActivityBehavior {
     }
   }
 
-  protected void setFrom(Email email, String from, String tenantId) {
+  protected void setFrom(MimeMessageHelper msgHelper, String from, String tenantId) {
     String fromAddress = null;
 
     if (from != null) {
@@ -195,64 +167,74 @@ public class MailActivityBehavior extends AbstractBpmnActivityBehavior {
     }
 
     try {
-      email.setFrom(fromAddress);
-    } catch (EmailException e) {
+        msgHelper.setFrom(fromAddress);
+    } catch (MessagingException e) {
       throw new ActivitiException("Could not set " + from + " as from address in email", e);
     }
   }
 
-  protected void addCc(Email email, String cc) {
+  protected void addCc(MimeMessageHelper msgHelper, String cc) {
     String[] ccs = splitAndTrim(cc);
     if (ccs != null) {
       for (String c : ccs) {
         try {
-          email.addCc(c);
-        } catch (EmailException e) {
+            msgHelper.addCc(c);
+        } catch (MessagingException e) {
           throw new ActivitiException("Could not add " + c + " as cc recipient", e);
         }
       }
     }
   }
 
-  protected void addBcc(Email email, String bcc) {
+  protected void addBcc(MimeMessageHelper msgHelper, String bcc) {
     String[] bccs = splitAndTrim(bcc);
     if (bccs != null) {
       for (String b : bccs) {
         try {
-          email.addBcc(b);
-        } catch (EmailException e) {
+            msgHelper.addBcc(b);
+        } catch (MessagingException e) {
           throw new ActivitiException("Could not add " + b + " as bcc recipient", e);
         }
       }
     }
   }
 
-  protected void attach(Email email, List<File> files, List<DataSource> dataSources) throws EmailException {
-    if (!(email instanceof MultiPartEmail && attachmentsExist(files, dataSources))) {
+  protected void attach(MimeMessageHelper msgHelper, List<File> files, List<DataSource> dataSources) throws MessagingException {
+    if (!attachmentsExist(files, dataSources)) {
       return;
     }
-    MultiPartEmail mpEmail = (MultiPartEmail) email;
-    for (File file : files) {
-      mpEmail.attach(file);
-    }
-    for (DataSource ds : dataSources) {
-      if (ds != null) {
-        mpEmail.attach(ds, ds.getName(), null);
+    files.forEach(file -> {
+        try {
+            msgHelper.addAttachment(file.getName(), file);
+        } catch (MessagingException e) {
+            throw new RuntimeException(e);
+        }
+    });
+
+    dataSources.forEach(ds -> {
+        try {
+            msgHelper.addAttachment(ds.getName(), ds);
+        } catch (MessagingException e) {
+            throw new RuntimeException(e);
+        }
+    });
+  }
+
+  protected void setSubject(MimeMessageHelper msgHelper, String subject) {
+      try {
+          msgHelper.setSubject(subject != null ? subject : "");
+      } catch (MessagingException e) {
+          throw new RuntimeException(e);
       }
-    }
   }
 
-  protected void setSubject(Email email, String subject) {
-    email.setSubject(subject != null ? subject : "");
-  }
-
-  protected void setMailServerProperties(Email email, String tenantId) {
+  protected void setMailServerProperties(JavaMailSenderImpl mailSender, String tenantId) {
     ProcessEngineConfigurationImpl processEngineConfiguration = Context.getProcessEngineConfiguration();
 
     boolean isMailServerSet = false;
     if (tenantId != null && tenantId.length() > 0) {
       if (processEngineConfiguration.getMailSessionJndi(tenantId) != null) {
-        setEmailSession(email, processEngineConfiguration.getMailSessionJndi(tenantId));
+        setEmailSession(mailSender, processEngineConfiguration.getMailSessionJndi(tenantId));
         isMailServerSet = true;
 
       } else if (processEngineConfiguration.getMailServer(tenantId) != null) {
@@ -261,17 +243,22 @@ public class MailActivityBehavior extends AbstractBpmnActivityBehavior {
         if (host == null) {
           throw new ActivitiException("Could not send email: no SMTP host is configured for tenantId " + tenantId);
         }
-        email.setHostName(host);
+        mailSender.setHost(host);
 
-        email.setSmtpPort(mailServerInfo.getMailServerPort());
+        mailSender.setPort(mailServerInfo.getMailServerPort());
 
-        email.setSSLOnConnect(mailServerInfo.isMailServerUseSSL());
-        email.setStartTLSEnabled(mailServerInfo.isMailServerUseTLS());
+        Properties props = new Properties();
+        props.put("mail.smtp.starttls.enable","true");
+        mailSender.setJavaMailProperties(props);
+
+//      TODO: find correct property for below
+        mailSender.setSSLOnConnect(mailServerInfo.isMailServerUseSSL());
 
         String user = mailServerInfo.getMailServerUsername();
         String password = mailServerInfo.getMailServerPassword();
         if (user != null && password != null) {
-          email.setAuthentication(user, password);
+          mailSender.setUsername(user);
+          mailSender.setPassword(password);
         }
 
         isMailServerSet = true;
@@ -281,41 +268,47 @@ public class MailActivityBehavior extends AbstractBpmnActivityBehavior {
     if (!isMailServerSet) {
       String mailSessionJndi = processEngineConfiguration.getMailSessionJndi();
       if (mailSessionJndi != null) {
-        setEmailSession(email, mailSessionJndi);
+        setEmailSession(mailSender, mailSessionJndi);
 
       } else {
         String host = processEngineConfiguration.getMailServerHost();
         if (host == null) {
           throw new ActivitiException("Could not send email: no SMTP host is configured");
         }
-        email.setHostName(host);
+        mailSender.setHost(host);
 
         int port = processEngineConfiguration.getMailServerPort();
-        email.setSmtpPort(port);
+        mailSender.setPort(port);
 
-        email.setSSLOnConnect(processEngineConfiguration.getMailServerUseSSL());
-        email.setStartTLSEnabled(processEngineConfiguration.getMailServerUseTLS());
+        Properties props = new Properties();
+        props.put("mail.smtp.starttls.enable","true");
+        mailSender.setJavaMailProperties(props);
+
+//      TODO: find correct property for below
+        mailSender.setSSLOnConnect(processEngineConfiguration.getMailServerUseSSL());
 
         String user = processEngineConfiguration.getMailServerUsername();
         String password = processEngineConfiguration.getMailServerPassword();
         if (user != null && password != null) {
-          email.setAuthentication(user, password);
+          mailSender.setUsername(user);
+          mailSender.setPassword(password);
         }
       }
     }
   }
 
-  protected void setEmailSession(Email email, String mailSessionJndi) {
+  protected void setEmailSession(JavaMailSenderImpl mailSender, String mailSessionJndi) {
     try {
-      email.setMailSessionFromJNDI(mailSessionJndi);
+//    TODO: find fix for below
+      mailSender.setMailSessionFromJNDI(mailSessionJndi);
     } catch (NamingException e) {
       throw new ActivitiException("Could not send email: Incorrect JNDI configuration", e);
     }
   }
 
-  protected void setCharset(Email email, String charSetStr) {
+  protected void setCharset(JavaMailSenderImpl mailSender, String charSetStr) {
     if (charset != null) {
-      email.setCharset(charSetStr);
+        mailSender.setDefaultEncoding(charSetStr);
     }
   }
 
