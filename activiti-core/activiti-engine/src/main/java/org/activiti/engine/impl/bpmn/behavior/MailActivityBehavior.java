@@ -23,7 +23,7 @@ import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
-import java.util.Properties
+import java.util.Properties;
 
 import javax.naming.NamingException;
 
@@ -248,11 +248,9 @@ public class MailActivityBehavior extends AbstractBpmnActivityBehavior {
         mailSender.setPort(mailServerInfo.getMailServerPort());
 
         Properties props = new Properties();
-        props.put("mail.smtp.starttls.enable","true");
+        props.put("mail.smtp.starttls.enable",mailServerInfo.isMailServerUseTLS());
+        props.put("mail.smtp.ssl.enable",mailServerInfo.isMailServerUseSSL());
         mailSender.setJavaMailProperties(props);
-
-//      TODO: find correct property for below
-        mailSender.setSSLOnConnect(mailServerInfo.isMailServerUseSSL());
 
         String user = mailServerInfo.getMailServerUsername();
         String password = mailServerInfo.getMailServerPassword();
@@ -281,11 +279,9 @@ public class MailActivityBehavior extends AbstractBpmnActivityBehavior {
         mailSender.setPort(port);
 
         Properties props = new Properties();
-        props.put("mail.smtp.starttls.enable","true");
+        props.put("mail.smtp.starttls.enable",processEngineConfiguration.getMailServerUseTLS());
+        props.put("mail.smtp.ssl.enable",processEngineConfiguration.getMailServerUseSSL());
         mailSender.setJavaMailProperties(props);
-
-//      TODO: find correct property for below
-        mailSender.setSSLOnConnect(processEngineConfiguration.getMailServerUseSSL());
 
         String user = processEngineConfiguration.getMailServerUsername();
         String password = processEngineConfiguration.getMailServerPassword();
