@@ -14,6 +14,7 @@ package org.activiti.engine.impl.interceptor;
 
 /**
  * The command executor for internal usage.
+ * 命令执行者
  * 
  * @author Tom Baeyens
  */

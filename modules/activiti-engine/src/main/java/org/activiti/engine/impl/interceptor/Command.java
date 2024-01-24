@@ -13,6 +13,7 @@
 package org.activiti.engine.impl.interceptor;
 
 /**
+ * 命令抽象
  * @author Tom Baeyens
  */
 public interface Command<T> {

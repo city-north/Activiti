@@ -72,6 +72,7 @@ public class BpmnDeploymentTest extends PluggableActivitiTestCase {
     return new String(bytes);
   }
 
+
   public void testViolateBPMNIdMaximumLength() {
     try {
       repositoryService.createDeployment()
